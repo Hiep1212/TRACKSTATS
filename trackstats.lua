@@ -1,4 +1,4 @@
--- 🌟 GROW A GARDEN INVENTORY TRACKER (CLIENT SIDE ONLY) 🌟
+-- 🌟 GROW A GARDEN INVENTORY TRACKER (FIXED WEBHOOK) 🌟
 -- Dán toàn bộ code này vào executor
 
 local Players = game:GetService("Players")
@@ -13,7 +13,6 @@ local categoryFilters = {
     Seeds = {"Seed", "Hạt", "Hạt giống"},
     Pets = {"Pet", "Thú", "Thú cưng", "Animal"},
     Eggs = {"Egg", "Trứng", "Eggs"},
-    Eggs = {"Egg", "Trứng", "Eggs"},
     Gear = {"Gear", "Tool", "Dụng cụ", "Weapon", "Equipment"}
 }
 
@@ -24,7 +23,7 @@ local inventory = {
     Gear = {}
 }
 
--- 🔥 Hàm gửi webhook trực tiếp từ client
+-- 🔥 Hàm gửi webhook SỬ DỤNG EXECUTOR REQUEST
 local function sendToDiscord(message, embedData)
     local data = {
         content = message,
@@ -33,28 +32,52 @@ local function sendToDiscord(message, embedData)
         avatar_url = "https://i.imgur.com/6zJkJnN.png"
     }
     
-    local success, error = pcall(function()
-        -- Sử dụng request library của executor nếu có
-        if syn and syn.request then
-            syn.request({
-                Url = WEBHOOK_URL,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json"
-                },
-                Body = HttpService:JSONEncode(data)
-            })
-        else
-            -- Fallback cho executor khác
-            HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode(data))
-        end
-    end)
+    local jsonData = HttpService:JSONEncode(data)
     
-    if not success then
-        warn("❌ Lỗi webhook: " .. tostring(error))
-        return false
+    -- Sử dụng request library của executor
+    if syn and syn.request then
+        -- Synapse X
+        local response = syn.request({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = jsonData
+        })
+        return response.StatusCode == 200 or response.StatusCode == 204
+        
+    elseif request then
+        -- Krnl và executor khác
+        local response = request({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = jsonData
+        })
+        return response.Success
+        
+    elseif http and http.request then
+        -- Executor có http library
+        local response = http.request({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = jsonData
+        })
+        return response.Success
+        
+    else
+        -- Fallback: thử dùng HttpService (có thể fail)
+        local success, error = pcall(function()
+            HttpService:PostAsync(WEBHOOK_URL, jsonData)
+        end)
+        return success
     end
-    return true
 end
 
 -- 🔥 Hàm tạo embed
@@ -66,13 +89,14 @@ local function createEmbed(title, description, color, fields)
         fields = fields,
         timestamp = DateTime.now():ToIsoDate(),
         footer = {
-            text = "Grow a Garden • " .. os.date("%H:%M:%S")
+            text = player.Name .. " • " .. os.date("%H:%M:%S")
         }
     }
 end
 
 -- 🔥 Hàm xác định category
 local function getItemCategory(itemName)
+    if not itemName then return "Other" end
     itemName = itemName:lower()
     for category, keywords in pairs(categoryFilters) do
         for _, keyword in ipairs(keywords) do
@@ -127,7 +151,7 @@ local function sendInventoryToDiscord()
     end
     
     local embed = createEmbed(
-        "🌿 Grow a Garden Inventory - " .. player.Name,
+        "🌿 Grow a Garden Inventory",
         description,
         65280, -- Màu xanh lá
         {
@@ -145,18 +169,24 @@ local function sendInventoryToDiscord()
     )
     
     local success = sendToDiscord("📊 **INVENTORY UPDATE**", embed)
-    print(success and "✅ Đã gửi inventory" or "❌ Lỗi gửi inventory")
+    if success then
+        print("✅ Đã gửi inventory: " .. totalItems .. " items")
+    else
+        print("❌ Lỗi gửi inventory")
+    end
 end
 
 -- 🔥 Hàm xử lý item mới
 local function onItemAdded(newItem)
-    task.wait(0.5)
+    task.wait(1) -- Chờ item load hoàn toàn
+    if not newItem or not newItem:IsA("Tool") then return end
+    
     local category = getItemCategory(newItem.Name)
     if inventory[category] then
         table.insert(inventory[category], newItem.Name)
         
         local embed = createEmbed(
-            "🎯 ITEM MỚI ĐƯỢC THÊM - " .. player.Name,
+            "🎯 ITEM MỚI ĐƯỢC THÊM",
             string.format("**Tên:** %s\n**Loại:** %s", newItem.Name, category),
             5814783, -- Màu xanh dương
             {
@@ -174,7 +204,11 @@ local function onItemAdded(newItem)
         )
         
         local success = sendToDiscord("✨ **CÓ ITEM MỚI!**", embed)
-        print(success and "✅ Đã gửi item mới: " .. newItem.Name or "❌ Lỗi gửi item mới")
+        if success then
+            print("✅ Đã thêm: " .. newItem.Name)
+        else
+            print("❌ Lỗi gửi item mới")
+        end
         
         -- Gửi inventory update sau 1 giây
         task.wait(1)
@@ -184,6 +218,8 @@ end
 
 -- 🔥 Hàm xử lý item mất
 local function onItemRemoved(removedItem)
+    if not removedItem or not removedItem:IsA("Tool") then return end
+    
     local category = getItemCategory(removedItem.Name)
     if inventory[category] then
         for i, itemName in ipairs(inventory[category]) do
@@ -191,7 +227,7 @@ local function onItemRemoved(removedItem)
                 table.remove(inventory[category], i)
                 
                 local embed = createEmbed(
-                    "❌ ITEM BỊ MẤT - " .. player.Name,
+                    "❌ ITEM BỊ MẤT",
                     string.format("**Tên:** %s\n**Loại:** %s", removedItem.Name, category),
                     16711680, -- Màu đỏ
                     {
@@ -209,7 +245,11 @@ local function onItemRemoved(removedItem)
                 )
                 
                 local success = sendToDiscord("💔 **ITEM BỊ MẤT!**", embed)
-                print(success and "✅ Đã gửi item mất: " .. removedItem.Name or "❌ Lỗi gửi item mất")
+                if success then
+                    print("✅ Đã mất: " .. removedItem.Name)
+                else
+                    print("❌ Lỗi gửi item mất")
+                end
                 
                 -- Gửi inventory update sau 1 giây
                 task.wait(1)
@@ -222,6 +262,7 @@ end
 
 -- 🚀 KHỞI ĐỘNG HỆ THỐNG
 print("🌿 GROW A GARDEN TRACKER ĐANG KHỞI ĐỘNG...")
+print("👤 Player: " .. player.Name)
 
 -- Chờ player load
 while not player.Character do
@@ -247,5 +288,4 @@ player.CharacterAdded:Connect(function()
 end)
 
 print("✅ HỆ THỐNG ĐÃ SẴN SÀNG!")
-print("👉 Đang theo dõi Backpack của: " .. player.Name)
 print("🔔 Mọi thay đổi sẽ được gửi đến Discord!")
