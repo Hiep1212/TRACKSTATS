@@ -1,148 +1,251 @@
-local HttpService = game:GetService("HttpService")
+-- 🌟 GROW A GARDEN INVENTORY TRACKER (CLIENT SIDE ONLY) 🌟
+-- Dán toàn bộ code này vào executor
+
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
 
--- Webhook URL
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1410899635135844433/XRFNK82iZC-VzwyJ-L6Da0u6yEqJKHJHzKUQtrn5NU2EM69OYy3UB2ouQRuCbPq_wiCg"
+-- Webhook Discord
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1408341281033158657/m9XMjG3Z_KOp7PdPpZYtIFyMmGiMQvt_V-maL4iywLoGCSsXflFwxawy_z8oEsO0aTD1"
 
--- Queue để tránh rate limit
-local requestQueue = {}
-local isProcessingQueue = false
+-- Bộ lọc phân loại item
+local categoryFilters = {
+    Seeds = {"Seed", "Hạt", "Hạt giống"},
+    Pets = {"Pet", "Thú", "Thú cưng", "Animal"},
+    Eggs = {"Egg", "Trứng", "Eggs"},
+    Eggs = {"Egg", "Trứng", "Eggs"},
+    Gear = {"Gear", "Tool", "Dụng cụ", "Weapon", "Equipment"}
+}
 
--- Hàm gửi webhook với embed
-local function sendToWebhook(username, message, color)
+local inventory = {
+    Seeds = {},
+    Pets = {},
+    Eggs = {},
+    Gear = {}
+}
+
+-- 🔥 Hàm gửi webhook trực tiếp từ client
+local function sendToDiscord(message, embedData)
     local data = {
-        embeds = {{
-            title = "Inventory Update for " .. username,
-            description = message,
-            color = color or 0x00FF00, -- Màu xanh lá mặc định
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ") -- Thời gian UTC
-        }},
-        username = "Spidey Bot",
-        avatar_url = "https://example.com/spideybot.png" -- Optional
+        content = message,
+        embeds = embedData and {embedData} or nil,
+        username = "Grow a Garden Tracker - " .. player.Name,
+        avatar_url = "https://i.imgur.com/6zJkJnN.png"
     }
-    local jsonData = HttpService:JSONEncode(data)
     
-    table.insert(requestQueue, jsonData)
-    processQueue() -- Gọi hàm xử lý queue
-end -- Kết thúc hàm sendToWebhook
-
--- Hàm xử lý queue để tránh rate limit
-local function processQueue()
-    if isProcessingQueue or #requestQueue == 0 then return end
-    isProcessingQueue = true
-    
-    local jsonData = requestQueue[1]
-    local success, err = pcall(function()
-        HttpService:PostAsync(WEBHOOK_URL, jsonData, Enum.HttpContentType.ApplicationJson)
+    local success, error = pcall(function()
+        -- Sử dụng request library của executor nếu có
+        if syn and syn.request then
+            syn.request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = HttpService:JSONEncode(data)
+            })
+        else
+            -- Fallback cho executor khác
+            HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode(data))
+        end
     end)
     
-    if success then
-        print("Webhook gửi thành công: " .. jsonData)
-        table.remove(requestQueue, 1)
-    else
-        warn("Lỗi gửi webhook: " .. tostring(err))
+    if not success then
+        warn("❌ Lỗi webhook: " .. tostring(error))
+        return false
     end
-    
-    isProcessingQueue = false
-    if #requestQueue > 0 then
-        wait(2) -- Delay 2s để tránh rate limit
-        processQueue()
-    end
-end -- Kết thúc hàm processQueue
+    return true
+end
 
--- Hàm lấy inventory dưới dạng string
-local function getInventoryString(inventoryFolder)
-    if not inventoryFolder then
-        print("Debug: inventoryFolder is nil in getInventoryString")
-        return "Inventory chưa được tạo."
+-- 🔥 Hàm tạo embed
+local function createEmbed(title, description, color, fields)
+    return {
+        title = title,
+        description = description,
+        color = color,
+        fields = fields,
+        timestamp = DateTime.now():ToIsoDate(),
+        footer = {
+            text = "Grow a Garden • " .. os.date("%H:%M:%S")
+        }
+    }
+end
+
+-- 🔥 Hàm xác định category
+local function getItemCategory(itemName)
+    itemName = itemName:lower()
+    for category, keywords in pairs(categoryFilters) do
+        for _, keyword in ipairs(keywords) do
+            if itemName:find(keyword:lower()) then
+                return category
+            end
+        end
+    end
+    return "Other"
+end
+
+-- 🔥 Hàm cập nhật inventory
+local function updateFullInventory()
+    for category in pairs(inventory) do
+        inventory[category] = {}
     end
     
-    local invStr = ""
-    for _, category in ipairs({"Seeds", "Eggs", "Pets", "Gears"}) do
-        local catFolder = inventoryFolder:FindFirstChild(category)
-        if catFolder then
-            invStr = invStr .. "**" .. category .. ":**\n"
-            for _, item in ipairs(catFolder:GetChildren()) do
-                local quantity = item:IsA("ValueBase") and item.Value or 0
-                invStr = invStr .. "- " .. item.Name .. ": " .. quantity .. "\n"
-            end
-            invStr = invStr .. "\n"
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then
+        warn("❌ Chưa tìm thấy Backpack")
+        return 0
+    end
+    
+    local allItems = backpack:GetChildren()
+    for _, item in ipairs(allItems) do
+        local category = getItemCategory(item.Name)
+        if inventory[category] then
+            table.insert(inventory[category], item.Name)
         end
     end
     
-    return invStr ~= "" and invStr or "Inventory rỗng."
-end -- Kết thúc hàm getInventoryString
+    return #allItems
+end
 
--- Khi player join
-Players.PlayerAdded:Connect(function(player)
-    local username = player.Name
-    print("Player joined: " .. username)
+-- 🔥 Hàm gửi inventory đến Discord
+local function sendInventoryToDiscord()
+    local totalItems = updateFullInventory()
+    local description = ""
     
-    -- Chờ Inventory được tạo, tăng thời gian chờ lên 10s
-    local inventoryFolder = player:WaitForChild("Inventory", 10)
-    if not inventoryFolder then
-        print("Debug: Inventory không tồn tại, tạo mới cho " .. username)
-        inventoryFolder = Instance.new("Folder")
-        inventoryFolder.Name = "Inventory"
-        inventoryFolder.Parent = player
+    for category, items in pairs(inventory) do
+        if #items > 0 then
+            description = description .. string.format("**%s (%d):**\n", category, #items)
+            for _, itemName in ipairs(items) do
+                description = description .. string.format("• %s\n", itemName)
+            end
+            description = description .. "\n"
+        end
+    end
+    
+    if description == "" then
+        description = "📭 Inventory trống rỗng"
+    end
+    
+    local embed = createEmbed(
+        "🌿 Grow a Garden Inventory - " .. player.Name,
+        description,
+        65280, -- Màu xanh lá
+        {
+            {
+                name = "📦 Total Items",
+                value = tostring(totalItems),
+                inline = true
+            },
+            {
+                name = "👤 Player",
+                value = player.Name,
+                inline = true
+            }
+        }
+    )
+    
+    local success = sendToDiscord("📊 **INVENTORY UPDATE**", embed)
+    print(success and "✅ Đã gửi inventory" or "❌ Lỗi gửi inventory")
+end
+
+-- 🔥 Hàm xử lý item mới
+local function onItemAdded(newItem)
+    task.wait(0.5)
+    local category = getItemCategory(newItem.Name)
+    if inventory[category] then
+        table.insert(inventory[category], newItem.Name)
         
-        for _, cat in ipairs({"Seeds", "Eggs", "Pets", "Gears"}) do
-            local catFolder = Instance.new("Folder")
-            catFolder.Name = cat
-            catFolder.Parent = inventoryFolder
-        end
+        local embed = createEmbed(
+            "🎯 ITEM MỚI ĐƯỢC THÊM - " .. player.Name,
+            string.format("**Tên:** %s\n**Loại:** %s", newItem.Name, category),
+            5814783, -- Màu xanh dương
+            {
+                {
+                    name = "📦 Category",
+                    value = category,
+                    inline = true
+                },
+                {
+                    name = "👤 Player",
+                    value = player.Name,
+                    inline = true
+                }
+            }
+        )
+        
+        local success = sendToDiscord("✨ **CÓ ITEM MỚI!**", embed)
+        print(success and "✅ Đã gửi item mới: " .. newItem.Name or "❌ Lỗi gửi item mới")
+        
+        -- Gửi inventory update sau 1 giây
+        task.wait(1)
+        sendInventoryToDiscord()
     end
-    
-    -- Gửi inventory ban đầu
-    sendToWebhook(username, "Player vừa join. Inventory ban đầu:\n" .. getInventoryString(inventoryFolder), 0x00FF00)
-    
-    -- Theo dõi thay đổi inventory
-    inventoryFolder.ChildAdded:Connect(function(child)
-        print("Thêm category: " .. child.Name)
-        sendToWebhook(username, "Thay đổi: Thêm category mới - " .. child.Name, 0xFFFF00) -- Màu vàng
-    end)
-    
-    inventoryFolder.ChildRemoved:Connect(function(child)
-        print("Xóa category: " .. child.Name)
-        sendToWebhook(username, "Thay đổi: Xóa category - " .. child.Name, 0xFF0000) -- Màu đỏ
-    end)
-    
-    inventoryFolder.DescendantAdded:Connect(function(descendant)
-        local quantity = descendant:IsA("ValueBase") and descendant.Value or 0
-        print("Thêm item: " .. descendant.Name .. " (số lượng: " .. quantity .. ")")
-        sendToWebhook(username, "Thay đổi: Thêm item mới - " .. descendant.Name .. " (số lượng: " .. quantity .. ")", 0x00FFFF) -- Màu cyan
-    end)
-    
-    inventoryFolder.DescendantRemoving:Connect(function(descendant)
-        print("Xóa item: " .. descendant.Name)
-        sendToWebhook(username, "Thay đổi: Xóa item - " .. descendant.Name, 0xFF0000) -- Màu đỏ
-    end)
-    
-    -- Theo dõi thay đổi số lượng
-    for _, catFolder in ipairs(inventoryFolder:GetChildren()) do
-        for _, item in ipairs(catFolder:GetChildren()) do
-            if item:IsA("ValueBase") then
-                item:GetPropertyChangedSignal("Value"):Connect(function()
-                    print("Số lượng thay đổi: " .. item.Name .. " = " .. item.Value)
-                    sendToWebhook(username, "Thay đổi số lượng: " .. item.Name .. " giờ là " .. item.Value, 0xFFA500) -- Màu cam
-                end)
+end
+
+-- 🔥 Hàm xử lý item mất
+local function onItemRemoved(removedItem)
+    local category = getItemCategory(removedItem.Name)
+    if inventory[category] then
+        for i, itemName in ipairs(inventory[category]) do
+            if itemName == removedItem.Name then
+                table.remove(inventory[category], i)
+                
+                local embed = createEmbed(
+                    "❌ ITEM BỊ MẤT - " .. player.Name,
+                    string.format("**Tên:** %s\n**Loại:** %s", removedItem.Name, category),
+                    16711680, -- Màu đỏ
+                    {
+                        {
+                            name = "📦 Category",
+                            value = category,
+                            inline = true
+                        },
+                        {
+                            name = "👤 Player",
+                            value = player.Name,
+                            inline = true
+                        }
+                    }
+                )
+                
+                local success = sendToDiscord("💔 **ITEM BỊ MẤT!**", embed)
+                print(success and "✅ Đã gửi item mất: " .. removedItem.Name or "❌ Lỗi gửi item mất")
+                
+                -- Gửi inventory update sau 1 giây
+                task.wait(1)
+                sendInventoryToDiscord()
+                break
             end
         end
     end
-    
-    inventoryFolder.DescendantAdded:Connect(function(descendant)
-        if descendant:IsA("ValueBase") then
-            descendant:GetPropertyChangedSignal("Value"):Connect(function()
-                print("Số lượng thay đổi: " .. descendant.Name .. " = " .. descendant.Value)
-                sendToWebhook(username, "Thay đổi số lượng: " .. descendant.Name .. " giờ là " .. descendant.Value, 0xFFA500) -- Màu cam
-            end)
-        end
-    end)
-end) -- Kết thúc PlayerAdded
+end
 
--- Khi player leave
-Players.PlayerRemoving:Connect(function(player)
-    local inventoryFolder = player:FindFirstChild("Inventory")
-    print("Player leave: " .. player.Name)
-    sendToWebhook(player.Name, "Player vừa leave. Inventory cuối cùng:\n" .. getInventoryString(inventoryFolder), 0x808080) -- Màu xám
-end) -- Kết thúc PlayerRemoving
+-- 🚀 KHỞI ĐỘNG HỆ THỐNG
+print("🌿 GROW A GARDEN TRACKER ĐANG KHỞI ĐỘNG...")
+
+-- Chờ player load
+while not player.Character do
+    task.wait(1)
+end
+
+local backpack = player:WaitForChild("Backpack")
+print("✅ Đã tìm thấy Backpack")
+
+-- Thiết lập listeners
+backpack.ChildAdded:Connect(onItemAdded)
+backpack.ChildRemoved:Connect(onItemRemoved)
+
+-- Gửi inventory ban đầu
+task.wait(3)
+sendInventoryToDiscord()
+
+-- Theo dõi respawn
+player.CharacterAdded:Connect(function()
+    task.wait(3)
+    print("♻️ Respawn detected - cập nhật inventory...")
+    sendInventoryToDiscord()
+end)
+
+print("✅ HỆ THỐNG ĐÃ SẴN SÀNG!")
+print("👉 Đang theo dõi Backpack của: " .. player.Name)
+print("🔔 Mọi thay đổi sẽ được gửi đến Discord!")
