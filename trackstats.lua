@@ -1,38 +1,68 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- Webhook URL từ bạn cung cấp
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1340257240308777002/f1ARtVXe6Qm_P4piWYTVBCd3nB3eFpE4sAQN2uPOrnbWIoHWnVgq6CcWmp-jVZdwfeSc"
+-- Webhook URL mới
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1410899635135844433/XRFNK82iZC-VzwyJ-L6Da0u6yEqJKHJHzKUQtrn5NU2EM69OYy3UB2ouQRuCbPq_wiCg"
 
--- Hàm gửi message đến Discord webhook
-local function sendToWebhook(username, message)
+-- Queue để tránh rate limit
+local requestQueue = {}
+local isProcessingQueue = false
+
+-- Hàm gửi webhook với embed
+local function sendToWebhook(username, message, color)
     local data = {
-        ["content"] = "**Tài khoản: " .. username .. "**\n" .. message,
-        ["username"] = "Grow a Garden Inventory Bot",  -- Tên bot hiển thị
-        ["avatar_url"] = "https://example.com/avatar.png"  -- Optional: Avatar URL
+        ["embeds"] = {{
+            ["title"] = "Inventory Update for " .. username,
+            ["description"] = message,
+            ["color"] = color or 0x00FF00, -- Màu xanh lá mặc định
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ") -- Thời gian UTC
+        }},
+        ["username"] = "Spidey Bot",
+        ["avatar_url"] = "https://example.com/spideybot.png" -- Optional
     }
     local jsonData = HttpService:JSONEncode(data)
     
+    table.insert(requestQueue, jsonData)
+    processQueue()
+end
+
+-- Hàm xử lý queue để tránh rate limit
+local function processQueue()
+    if isProcessingQueue or #requestQueue == 0 then return end
+    isProcessingQueue = true
+    
+    local jsonData = requestQueue[1]
     local success, err = pcall(function()
         HttpService:PostAsync(WEBHOOK_URL, jsonData, Enum.HttpContentType.ApplicationJson)
     end)
     
-    if not success then
+    if success then
+        print("Webhook gửi thành công: " .. jsonData)
+        table.remove(requestQueue, 1)
+    else
         warn("Lỗi gửi webhook: " .. tostring(err))
+    end
+    
+    isProcessingQueue = false
+    if #requestQueue > 0 then
+        wait(2) -- Delay 2s để tránh rate limit
+        processQueue()
     end
 end
 
--- Hàm lấy toàn bộ inventory dưới dạng string
+-- Hàm lấy inventory dưới dạng string
 local function getInventoryString(inventoryFolder)
-    local invStr = ""
+    if not inventoryFolder then
+        return "Inventory không tồn tại."
+    end
     
-    -- Duyệt qua các category: Seeds, Eggs, Pets, Gears
+    local invStr = ""
     for _, category in ipairs({"Seeds", "Eggs", "Pets", "Gears"}) do
         local catFolder = inventoryFolder:FindFirstChild(category)
         if catFolder then
             invStr = invStr .. "**" .. category .. ":**\n"
             for _, item in ipairs(catFolder:GetChildren()) do
-                local quantity = item.Value or 0  -- Giả sử Value là số lượng
+                local quantity = item:IsA("ValueBase") and item.Value or 0
                 invStr = invStr .. "- " .. item.Name .. ": " .. quantity .. "\n"
             end
             invStr = invStr .. "\n"
@@ -44,18 +74,17 @@ end
 
 -- Khi player join
 Players.PlayerAdded:Connect(function(player)
-    -- Kiểm tra tên account
     local username = player.Name
-    sendToWebhook(username, "Player vừa join. Kiểm tra inventory ban đầu:\n" .. getInventoryString(player:WaitForChild("Inventory")))
+    print("Player joined: " .. username)
     
-    -- Tạo folder Inventory nếu chưa có (cho demo)
-    local inventoryFolder = player:FindFirstChild("Inventory")
+    -- Chờ Inventory được tạo
+    local inventoryFolder = player:WaitForChild("Inventory", 5)
     if not inventoryFolder then
         inventoryFolder = Instance.new("Folder")
         inventoryFolder.Name = "Inventory"
         inventoryFolder.Parent = player
+        print("Tạo mới Inventory cho " .. username)
         
-        -- Tạo sub-folders
         for _, cat in ipairs({"Seeds", "Eggs", "Pets", "Gears"}) do
             local catFolder = Instance.new("Folder")
             catFolder.Name = cat
@@ -63,44 +92,56 @@ Players.PlayerAdded:Connect(function(player)
         end
     end
     
-    -- Theo dõi thay đổi inventory (thêm/xóa item)
+    -- Gửi inventory ban đầu
+    sendToWebhook(username, "Player vừa join. Inventory ban đầu:\n" .. getInventoryString(inventoryFolder), 0x00FF00)
+    
+    -- Theo dõi thay đổi inventory
     inventoryFolder.ChildAdded:Connect(function(child)
-        sendToWebhook(username, "Thay đổi: Thêm category mới - " .. child.Name)
+        print("Thêm category: " .. child.Name)
+        sendToWebhook(username, "Thay đổi: Thêm category mới - " .. child.Name, 0xFFFF00) -- Màu vàng
     end)
     
     inventoryFolder.ChildRemoved:Connect(function(child)
-        sendToWebhook(username, "Thay đổi: Xóa category - " .. child.Name)
+        print("Xóa category: " .. child.Name)
+        sendToWebhook(username, "Thay đổi: Xóa category - " .. child.Name, 0xFF0000) -- Màu đỏ
     end)
     
-    -- Theo dõi sâu hơn (thay đổi item bên trong category, ví dụ bán/sử dụng/thêm)
     inventoryFolder.DescendantAdded:Connect(function(descendant)
-        sendToWebhook(username, "Thay đổi: Thêm item mới - " .. descendant.Name .. " (số lượng: " .. (descendant.Value or 0) .. ")")
+        local quantity = descendant:IsA("ValueBase") and descendant.Value or 0
+        print("Thêm item: " .. descendant.Name .. " (số lượng: " .. quantity .. ")")
+        sendToWebhook(username, "Thay đổi: Thêm item mới - " .. descendant.Name .. " (số lượng: " .. quantity .. ")", 0x00FFFF) -- Màu cyan
     end)
     
     inventoryFolder.DescendantRemoving:Connect(function(descendant)
-        sendToWebhook(username, "Thay đổi: Xóa item - " .. descendant.Name)
+        print("Xóa item: " .. descendant.Name)
+        sendToWebhook(username, "Thay đổi: Xóa item - " .. descendant.Name, 0xFF0000) -- Màu đỏ
     end)
     
-    -- Theo dõi thay đổi số lượng (ví dụ bán hoặc sử dụng)
+    -- Theo dõi thay đổi số lượng
     for _, catFolder in ipairs(inventoryFolder:GetChildren()) do
         for _, item in ipairs(catFolder:GetChildren()) do
-            item:GetPropertyChangedSignal("Value"):Connect(function()
-                sendToWebhook(username, "Thay đổi số lượng: " .. item.Name .. " giờ là " .. item.Value)
-            end)
+            if item:IsA("ValueBase") then
+                item:GetPropertyChangedSignal("Value"):Connect(function()
+                    print("Số lượng thay đổi: " .. item.Name .. " = " .. item.Value)
+                    sendToWebhook(username, "Thay đổi số lượng: " .. item.Name .. " giờ là " .. item.Value, 0xFFA500) -- Màu cam
+                end)
+            end
         end
     end
     
-    -- Khi thêm item mới vào category, cũng connect signal cho nó
     inventoryFolder.DescendantAdded:Connect(function(descendant)
-        if descendant:IsA("IntValue") or descendant:IsA("NumberValue") then  -- Giả sử item là ValueBase
+        if descendant:IsA("ValueBase") then
             descendant:GetPropertyChangedSignal("Value"):Connect(function()
-                sendToWebhook(username, "Thay đổi số lượng: " .. descendant.Name .. " giờ là " .. descendant.Value)
+                print("Số lượng thay đổi: " .. descendant.Name .. " = " .. descendant.Value)
+                sendToWebhook(username, "Thay đổi số lượng: " .. descendant.Name .. " giờ là " .. descendant.Value, 0xFFA500) -- Màu cam
             end)
         end
     end)
 end)
 
--- Khi player leave, gửi thông báo cuối
+-- Khi player leave
 Players.PlayerRemoving:Connect(function(player)
-    sendToWebhook(player.Name, "Player vừa leave. Inventory cuối cùng:\n" .. getInventoryString(player:FindFirstChild("Inventory")))
+    local inventoryFolder = player:FindFirstChild("Inventory")
+    print("Player leave: " .. player.Name)
+    sendToWebhook(player.Name, "Player vừa leave. Inventory cuối cùng:\n" .. getInventoryString(inventoryFolder), 0x808080) -- Màu xám
 end)
