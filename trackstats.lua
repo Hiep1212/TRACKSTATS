@@ -1,7 +1,7 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
--- Webhook URL mới
+-- Webhook URL từ bạn cung cấp
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1410899635135844433/XRFNK82iZC-VzwyJ-L6Da0u6yEqJKHJHzKUQtrn5NU2EM69OYy3UB2ouQRuCbPq_wiCg"
 
 -- Queue để tránh rate limit
@@ -11,20 +11,20 @@ local isProcessingQueue = false
 -- Hàm gửi webhook với embed
 local function sendToWebhook(username, message, color)
     local data = {
-        ["embeds"] = {{
-            ["title"] = "Inventory Update for " .. username,
-            ["description"] = message,
-            ["color"] = color or 0x00FF00, -- Màu xanh lá mặc định
-            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ") -- Thời gian UTC
+        embeds = {{
+            title = "Inventory Update for " .. username,
+            description = message,
+            color = color or 0x00FF00, -- Màu xanh lá mặc định
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ") -- Thời gian UTC
         }},
-        ["username"] = "Spidey Bot",
-        ["avatar_url"] = "https://example.com/spideybot.png" -- Optional
+        username = "Spidey Bot",
+        avatar_url = "https://example.com/spideybot.png" -- Optional
     }
     local jsonData = HttpService:JSONEncode(data)
     
     table.insert(requestQueue, jsonData)
-    processQueue()
-end
+    processQueue() -- Gọi hàm xử lý queue
+end -- Kết thúc hàm sendToWebhook
 
 -- Hàm xử lý queue để tránh rate limit
 local function processQueue()
@@ -48,7 +48,7 @@ local function processQueue()
         wait(2) -- Delay 2s để tránh rate limit
         processQueue()
     end
-end
+end -- Kết thúc hàm processQueue
 
 -- Hàm lấy inventory dưới dạng string
 local function getInventoryString(inventoryFolder)
@@ -70,7 +70,7 @@ local function getInventoryString(inventoryFolder)
     end
     
     return invStr ~= "" and invStr or "Inventory rỗng."
-end
+end -- Kết thúc hàm getInventoryString
 
 -- Khi player join
 Players.PlayerAdded:Connect(function(player)
@@ -137,11 +137,11 @@ Players.PlayerAdded:Connect(function(player)
             end)
         end
     end)
-end)
+end) -- Kết thúc PlayerAdded
 
 -- Khi player leave
 Players.PlayerRemoving:Connect(function(player)
     local inventoryFolder = player:FindFirstChild("Inventory")
     print("Player leave: " .. player.Name)
     sendToWebhook(player.Name, "Player vừa leave. Inventory cuối cùng:\n" .. getInventoryString(inventoryFolder), 0x808080) -- Màu xám
-end)
+end) -- Kết thúc PlayerRemoving
