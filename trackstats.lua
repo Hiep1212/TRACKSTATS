@@ -6,13 +6,11 @@ local RunService = game:GetService("RunService")
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1408341281033158657/m9XMjG3Z_KOp7PdPpZYtIFyMmGiMQvt_V-maL4iywLoGCSsXflFwxawy_z8oEsO0aTD1"
 
 -- Lấy thông tin account
-local accountName = "UnknownAccount"
-local userId = "0"
+local accountName = Players.LocalPlayer and Players.LocalPlayer.Name or "UnknownAccount"
+local userId = Players.LocalPlayer and tostring(Players.LocalPlayer.UserId) or "0"
 
-if Players.LocalPlayer then
-    accountName = Players.LocalPlayer.Name
-    userId = tostring(Players.LocalPlayer.UserId)
-end
+-- Biến để track trạng thái
+local isOnline = true
 
 -- Hàm gửi webhook an toàn
 local function sendDiscordWebhook(status)
@@ -56,11 +54,9 @@ local function sendDiscordWebhook(status)
         content = status == "ONLINE" and "🟢 **ACCOUNT ONLINE**" or "🔴 **ACCOUNT OFFLINE**"
     }
     
-    -- Sử dụng RequestAsync an toàn
-    local success, result = pcall(function()
+    pcall(function()
         local jsonData = HttpService:JSONEncode(webhookData)
-        
-        return HttpService:RequestAsync({
+        HttpService:RequestAsync({
             Url = WEBHOOK_URL,
             Method = "POST",
             Headers = {
@@ -69,52 +65,53 @@ local function sendDiscordWebhook(status)
             Body = jsonData
         })
     end)
-    
-    if success then
-        print("✅ Webhook sent: " .. status)
-    else
-        warn("❌ Webhook error: " .. tostring(result))
-    end
 end
 
--- Gửi thông báo ONLINE
+-- Gửi thông báo ONLINE ngay khi script chạy
 sendDiscordWebhook("ONLINE")
 print("🟢 Account Online: " .. accountName)
 
--- Hàm xử lý khi offline
-local function handleOffline()
-    sendDiscordWebhook("OFFLINE")
-    print("🔴 Account Offline: " .. accountName)
+-- Hàm xử lý khi game sắp đóng
+local function onGameClosing()
+    if isOnline then
+        isOnline = false
+        sendDiscordWebhook("OFFLINE")
+        print("🔴 Account Offline: " .. accountName)
+        wait(1) -- Đợi gửi webhook trước khi tắt
+    end
 end
 
--- Method 1: Detect khi player rời game
+-- Sử dụng sự kiện khi game shutdown
+game:BindToClose(onGameClosing)
+
+-- Sử dụng sự kiện khi player rời game
 Players.PlayerRemoving:Connect(function(player)
     if player.Name == accountName then
-        handleOffline()
+        onGameClosing()
     end
 end)
 
--- Method 2: Kiểm tra định kỳ
+-- Backup: Kiểm tra định kỳ nếu player còn trong game
 coroutine.wrap(function()
-    while true do
-        local playerFound = false
+    while isOnline do
+        local playerStillHere = false
         for _, player in pairs(Players:GetPlayers()) do
             if player.Name == accountName then
-                playerFound = true
+                playerStillHere = true
                 break
             end
         end
         
-        if not playerFound then
-            handleOffline()
+        if not playerStillHere then
+            onGameClosing()
             break
         end
         
-        wait(15) -- Kiểm tra mỗi 15 giây
+        wait(5) -- Kiểm tra mỗi 5 giây
     end
 end)()
 
 -- Giữ script chạy
-while true do
+while isOnline do
     RunService.Heartbeat:Wait()
 end
