@@ -1,81 +1,68 @@
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 
 -- Webhook Discord
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1408341281033158657/m9XMjG3Z_KOp7PdPpZYtIFyMmGiMQvt_V-maL4iywLoGCSsXflFwxawy_z8oEsO0aTD1"
 
 -- Lấy thông tin account
-local function getAccountInfo()
-    local player = Players.LocalPlayer
-    if not player then
-        return "UnknownAccount", "0"
-    end
-    return player.Name, tostring(player.UserId)
+local accountName = "Unknown"
+if Players.LocalPlayer then
+    accountName = Players.LocalPlayer.Name
 end
 
-local accountName, userId = getAccountInfo()
-
 -- Hàm gửi webhook an toàn
-local function sendDiscordWebhook(status)
+local function sendSafeWebhook(status)
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     
-    local embed = {
-        {
-            title = "🔔 ROBLOX ACCOUNT STATUS",
-            color = status == "ONLINE" and 65280 or 16711680,
-            fields = {
-                {
-                    name = "📝 Account",
-                    value = accountName,
-                    inline = true
-                },
-                {
-                    name = "🔄 Status",
-                    value = status,
-                    inline = true
-                },
-                {
-                    name = "🕐 Time",
-                    value = timestamp,
-                    inline = false
-                }
+    -- Tạo dữ liệu webhook
+    local webhookData = {
+        ["content"] = status == "ONLINE" and "🟢 **ACCOUNT ONLINE**" or "🔴 **ACCOUNT OFFLINE**",
+        ["embeds"] = {{
+            ["title"] = "ROBLOX ACCOUNT STATUS",
+            ["description"] = "**Account:** " .. accountName .. "\n**Status:** " .. status .. "\n**Time:** " .. timestamp,
+            ["color"] = status == "ONLINE" and 65280 or 16711680,
+            ["footer"] = {
+                ["text"] = "Monitor System"
             }
-        }
+        }}
     }
     
-    local data = {
-        embeds = embed,
-        username = "Account Monitor",
-        content = status == "ONLINE" and "🟢 Account Online!" or "🔴 Account Offline!"
-    }
-    
-    -- Sử dụng pcall để bắt lỗi an toàn
-    local success, errorMessage = pcall(function()
-        local jsonData = HttpService:JSONEncode(data)
-        HttpService:PostAsync(WEBHOOK_URL, jsonData, Enum.HttpContentType.ApplicationJson)
+    -- Sử dụng RequestAsync cho an toàn
+    local success, response = pcall(function()
+        return HttpService:RequestAsync({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(webhookData)
+        })
     end)
     
-    if not success then
-        warn("Webhook error: " .. tostring(errorMessage))
+    if success then
+        print("✅ Webhook sent: " .. status)
+    else
+        warn("❌ Webhook error: " .. tostring(response))
     end
 end
 
 -- Gửi thông báo ONLINE
-sendDiscordWebhook("ONLINE")
+sendSafeWebhook("ONLINE")
 print("🟢 Account Online: " .. accountName)
 
--- Xử lý sự kiện khi player rời game (thay cho BindToClose)
-local function onPlayerRemoving(player)
-    if player == Players.LocalPlayer then
-        sendDiscordWebhook("OFFLINE")
+-- Hàm xử lý khi player rời game
+local function onPlayerLeft(player)
+    if player and player.Name == accountName then
+        sendSafeWebhook("OFFLINE")
         print("🔴 Account Offline: " .. accountName)
     end
 end
 
-Players.PlayerRemoving:Connect(onPlayerRemoving)
+-- Kết nối sự kiện
+Players.PlayerRemoving:Connect(onPlayerLeft)
 
 -- Giữ script chạy
 while true do
-    wait(60) -- Chờ 1 phút
-    -- Có thể thêm kiểm tra định kỳ ở đây nếu cần
+    wait(10)
 end
+
